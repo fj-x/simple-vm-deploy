@@ -1,0 +1,12 @@
+# ----- app/deploy settings -----
+app_name: simple-vm-deploy
+app_dir: /opt/goapp
+
+# image pushed by GitHub Actions
+app_image: "ghcr.io/fj-x/simple-vm-deploy:latest"
+app_port: "8080"
+
+# optional: pin docker packages; leave as-is for Ubuntu/Debian repo
+docker_packages:
+  - docker.io
+  - docker-compose

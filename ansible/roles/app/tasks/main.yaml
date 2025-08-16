@@ -1,0 +1,26 @@
+---
+- name: Copy docker-compose file to server
+  copy:
+    src: "{{ playbook_dir }}/../docker-compose.yml"
+    dest: "{{ app_dir }}/docker-compose.yml"
+    mode: "0644"
+
+- name: Create/refresh .env for compose (optional)
+  copy:
+    dest: "{{ app_dir }}/.env"
+    mode: "0644"
+    content: |
+      APP_IMAGE={{ app_image }}
+      APP_PORT={{ app_port }}
+
+- name: Pull latest images
+  shell: docker-compose --env-file .env -f docker-compose.yml pull
+  args:
+    chdir: "{{ app_dir }}"
+  register: pull_result
+  changed_when: "'Downloaded newer image' in pull_result.stdout or 'Status: Downloaded' in pull_result.stdout"
+
+- name: Start (or update) the stack
+  shell: docker-compose --env-file .env -f docker-compose.yml up -d
+  args:
+    chdir: "{{ app_dir }}"

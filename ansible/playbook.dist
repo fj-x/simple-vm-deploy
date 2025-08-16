@@ -1,0 +1,263 @@
+---
+- name: Setup Go application with Docker and MySQL
+  hosts: go_server
+  become: yes
+  vars:
+    app_user: appuser
+    app_dir: /opt/go-app
+    docker_compose_version: "2.21.0"
+
+  tasks:
+    - name: Comprehensive Docker repository cleanup
+      shell: |
+        # Remove all Docker repository files
+        find /etc/apt/sources.list.d/ -name "*docker*" -delete
+        # Remove Docker keys
+        rm -f /etc/apt/keyrings/docker*
+        rm -f /usr/share/keyrings/docker*
+        # Remove Docker entries from all sources files
+        find /etc/apt/ -name "*.list" -exec sed -i '/docker\.com/d' {} \;
+        # Remove any Docker GPG keys
+        apt-key del 7EA0A9C3F273FCD8 2>/dev/null || true
+        apt-key del 9DC858229FC7DD38854AE2D88D81803C0EBFCD88 2>/dev/null || true
+        # Clean apt cache completely
+        apt-get clean
+        rm -rf /var/lib/apt/lists/*
+      ignore_errors: yes
+
+    - name: Fix apt sources and update cache
+      shell: |
+        apt-get clean
+        rm -rf /var/lib/apt/lists/*
+        apt-get update
+      ignore_errors: yes
+
+    - name: Update system packages
+      apt:
+        update_cache: yes
+        upgrade: yes
+
+    - name: Install required packages
+      apt:
+        name:
+          - curl
+          - wget
+          - git
+          - unzip
+          - ca-certificates
+          - gnupg
+          - lsb-release
+        state: present
+
+    - name: Create keyring directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Remove existing Docker GPG key if present
+      file:
+        path: /etc/apt/keyrings/docker.asc
+        state: absent
+
+    - name: Add Docker GPG key
+      get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0644'
+
+    - name: Remove existing Docker repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: absent
+
+    - name: Add Docker repository with proper signing key
+      apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+
+    - name: Start and enable Docker
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Create application user
+      user:
+        name: "{{ app_user }}"
+        shell: /bin/bash
+        home: "/home/{{ app_user }}"
+        create_home: yes
+
+    - name: Add application user to docker group
+      user:
+        name: "{{ app_user }}"
+        groups: docker
+        append: yes
+
+    - name: Create application directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0755'
+
+    - name: Remove existing docker-compose if present
+      file:
+        path: /usr/bin/docker-compose
+        state: absent
+
+    - name: Install Docker Compose
+      get_url:
+        url: "https://github.com/docker/compose/releases/download/v{{ docker_compose_version }}/docker-compose-linux-x86_64"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+
+    - name: Create Docker Compose symlink
+      file:
+        src: /usr/local/bin/docker-compose
+        dest: /usr/bin/docker-compose
+        state: link
+
+    - name: Configure UFW for application
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "8080"
+        - "3306"
+
+    - name: Create .env file template
+      template:
+        src: .env.j2
+        dest: "{{ app_dir }}/.env"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0600'
+      vars:
+        mysql_root_password: "{{ mysql_root_password | default('changeme123') }}"
+        mysql_database: "{{ mysql_database | default('goapp') }}"
+        mysql_user: "{{ mysql_user | default('gouser') }}"
+        mysql_password: "{{ mysql_password | default('gopassword') }}"
+
+    - name: Create systemd service for application
+      template:
+        src: go-app.service.j2
+        dest: /etc/systemd/system/go-app.service
+        mode: '0644'
+      notify:
+        - Reload systemd
+
+    - name: Copy Docker Compose and Dockerfile to VM
+      copy:
+        src: "{{ item }}"
+        dest: "{{ app_dir }}/{{ item }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0644'
+      loop:
+        - docker-compose.yml
+        - Dockerfile
+        - init.sql
+      when: item is file
+
+    - name: Create placeholder Go application files
+      copy:
+        content: |
+          package main
+
+          import (
+              "database/sql"
+              "fmt"
+              "log"
+              "net/http"
+              "os"
+
+              _ "github.com/go-sql-driver/mysql"
+          )
+
+          func main() {
+              dbHost := os.Getenv("DB_HOST")
+              dbUser := os.Getenv("DB_USER")
+              dbPassword := os.Getenv("DB_PASSWORD")
+              dbName := os.Getenv("DB_NAME")
+              
+              dsn := fmt.Sprintf("%s:%s@tcp(%s:3306)/%s", dbUser, dbPassword, dbHost, dbName)
+              db, err := sql.Open("mysql", dsn)
+              if err != nil {
+                  log.Fatal(err)
+              }
+              defer db.Close()
+
+              http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+                  if err := db.Ping(); err != nil {
+                      http.Error(w, "Database connection failed", http.StatusInternalServerError)
+                      return
+                  }
+                  w.WriteHeader(http.StatusOK)
+                  w.Write([]byte("OK"))
+              })
+
+              http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+                  w.Write([]byte("Hello from Go application!"))
+              })
+
+              log.Println("Server starting on :8080")
+              log.Fatal(http.ListenAndServe(":8080", nil))
+          }
+        dest: "{{ app_dir }}/main.go"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0644'
+
+    - name: Create Go module files
+      copy:
+        content: |
+          module go-app
+
+          go 1.21
+
+          require github.com/go-sql-driver/mysql v1.7.1
+        dest: "{{ app_dir }}/go.mod"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0644'
+
+    - name: Create go.sum file
+      copy:
+        content: |
+          github.com/go-sql-driver/mysql v1.7.1 h1:lUIinVbN1DY0xBg0eMOzmmtGoHwWBbvnWubQUrtU8EI=
+          github.com/go-sql-driver/mysql v1.7.1/go.mod h1:OXbVy3sEdcQ2Doequ6Z5BW6fXNQTmx+9S1MCJN5yJMI=
+        dest: "{{ app_dir }}/go.sum"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0644'
+
+    - name: Enable and start go-app service
+      systemd:
+        name: go-app
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+  handlers:
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Restart go-app
+      systemd:
+        name: go-app
+        state: restarted

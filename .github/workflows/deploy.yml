@@ -1,0 +1,54 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build image
+        run: |
+          IMAGE="ghcr.io/${{ github.repository }}/simple-vm-deploy:latest"
+          docker build -t "$IMAGE" .
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+
+      - name: Push image
+        run: docker push "$IMAGE"
+
+      - name: Setup Python & Ansible
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: pip install ansible
+
+      - name: Write SSH key
+        if: secrets.VM_SSH_PRIVATE_KEY != ''
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VM_SSH_PRIVATE_KEY }}" > ~/.ssh/id_vm
+          chmod 600 ~/.ssh/id_vm
+
+      - name: Run Ansible (deploy)
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: |
+          EXTRA_OPTS=""
+          if [ -f ~/.ssh/id_vm ]; then
+            EXTRA_OPTS="--key-file ~/.ssh/id_vm"
+          fi
+          ansible-playbook -i ansible/inventory.ini ansible/site.yml \
+          -e "vm_ip=${{ secrets.VM_IP }} vm_port=${{ secrets.VM_PORT }} vm_user=${{ secrets.VM_USER }} \
+          $EXTRA_OPTS

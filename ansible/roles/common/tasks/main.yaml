@@ -1,0 +1,22 @@
+---
+- name: Ensure apt cache is updated
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Install Docker runtime and helpers
+  apt:
+    name: "{{ docker_packages }}"
+    state: present
+
+- name: Ensure Docker service is enabled and running
+  service:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Create application directory
+  file:
+    path: "{{ app_dir }}"
+    state: directory
+    mode: "0755"

@@ -1,0 +1,16 @@
+[Unit]
+Description=Go Application
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory={{ app_dir }}
+ExecStart=/usr/local/bin/docker-compose up -d
+ExecStop=/usr/local/bin/docker-compose down
+User={{ app_user }}
+Group={{ app_user }}
+
+[Install]
+WantedBy=multi-user.target

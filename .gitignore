@@ -1,0 +1,24 @@
+# Go
+bin/
+*.exe
+*.dll
+*.so
+*.test
+*.out
+
+# Node/yarn just in case
+node_modules/
+
+# Ansible
+*.retry
+*.vault
+.vagrant/
+
+# macOS & editors
+.DS_Store
+.idea/
+.vscode/
+.claude/
+
+# Secrets (never commit)
+ansible/inventory.local.ini
