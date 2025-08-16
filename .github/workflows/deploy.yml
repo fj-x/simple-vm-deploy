@@ -35,20 +35,23 @@ jobs:
       - run: pip install ansible
 
       - name: Write SSH key
-        if: secrets.VM_SSH_PRIVATE_KEY != ''
+        SECRET_VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.VM_SSH_PRIVATE_KEY }}" > ~/.ssh/id_vm
+          echo "$SECRET_VM_SSH_PRIVATE_KEY" > ~/.ssh/id_vm
           chmod 600 ~/.ssh/id_vm
 
       - name: Run Ansible (deploy)
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
+          SECRET_VM_IP: ${{ secrets.VM_IP }}
+          SECRET_VM_PORT: ${{ secrets.VM_PORT }}
+          SECRET_VM_USER: ${{ secrets.VM_USER }}
         run: |
           EXTRA_OPTS=""
           if [ -f ~/.ssh/id_vm ]; then
             EXTRA_OPTS="--key-file ~/.ssh/id_vm"
           fi
           ansible-playbook -i ansible/inventory.ini ansible/site.yml \
-          -e "vm_ip=${{ secrets.VM_IP }} vm_port=${{ secrets.VM_PORT }} vm_user=${{ secrets.VM_USER }} \
+          -e "vm_ip=$SECRET_VM_IP vm_port=$SECRET_VM_PORT vm_user=$SECRET_VM_USER \
           $EXTRA_OPTS
