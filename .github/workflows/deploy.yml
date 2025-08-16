@@ -54,5 +54,5 @@ jobs:
             EXTRA_OPTS="--key-file ~/.ssh/id_vm"
           fi
           ansible-playbook -i ansible/inventory.ini ansible/site.yml \
-          -e "vm_ip=$SECRET_VM_IP vm_port=$SECRET_VM_PORT vm_user=$SECRET_VM_USER \
+          -e "vm_ip=$SECRET_VM_IP vm_port=$SECRET_VM_PORT vm_user=$SECRET_VM_USER" \
           $EXTRA_OPTS
