@@ -35,7 +35,8 @@ jobs:
       - run: pip install ansible
 
       - name: Write SSH key
-        SECRET_VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+        env:
+          SECRET_VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
           echo "$SECRET_VM_SSH_PRIVATE_KEY" > ~/.ssh/id_vm
